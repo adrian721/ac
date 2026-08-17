@@ -1,0 +1,6 @@
+{
+  "name": "KoolFix - Sistem Manajemen Servis AC & Teknisi",
+  "description": "Aplikasi manajemen servis AC terpadu dengan autentikasi multi-user dan kontrol pembatasan fitur terpusat oleh Super Admin: jadwal servis, riwayat perbaikan, pelacakan inventaris, skema komisi teknisi, absensi geotag GPS, laporan keuangan, dan otorisasi akses 5 peran.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
