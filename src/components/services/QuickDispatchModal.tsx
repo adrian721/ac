@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { ServiceOrder, User } from '../../types';
 import { 
@@ -15,7 +15,12 @@ import {
   Wrench,
   TrendingUp,
   ShieldCheck,
-  Send
+  Send,
+  Users,
+  Percent,
+  Sliders,
+  Crown,
+  UserPlus
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -24,22 +29,53 @@ interface QuickDispatchModalProps {
   onClose: () => void;
 }
 
+interface TechAssignmentItem {
+  technicianId: string;
+  roleInJob: 'LEAD' | 'ASSISTANT' | 'MEMBER';
+  commissionSharePercent: number;
+}
+
 export const QuickDispatchModal: React.FC<QuickDispatchModalProps> = ({ order, onClose }) => {
   const { 
     users, 
     serviceOrders, 
     attendanceRecords, 
-    assignTechnician, 
+    assignTechnicians, 
     calculateCommissionForOrder,
     updateServiceOrder
   } = useApp();
 
   const technicians = users.filter(u => u.role === 'TEKNISI');
-
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // State
-  const [selectedTechId, setSelectedTechId] = useState<string>(order.technicianId || technicians[0]?.id || '');
+  // Initialize selected technicians based on existing order assignments or single technicianId
+  const getInitialAssignments = (): TechAssignmentItem[] => {
+    if (order.assignedTechnicians && order.assignedTechnicians.length > 0) {
+      return order.assignedTechnicians.map(at => ({
+        technicianId: at.technicianId,
+        roleInJob: at.roleInJob,
+        commissionSharePercent: at.commissionSharePercent || Math.round(100 / order.assignedTechnicians!.length),
+      }));
+    }
+    if (order.technicianId) {
+      return [{
+        technicianId: order.technicianId,
+        roleInJob: 'LEAD',
+        commissionSharePercent: 100,
+      }];
+    }
+    if (technicians.length > 0) {
+      return [{
+        technicianId: technicians[0].id,
+        roleInJob: 'LEAD',
+        commissionSharePercent: 100,
+      }];
+    }
+    return [];
+  };
+
+  const [assignedTechs, setAssignedTechs] = useState<TechAssignmentItem[]>(getInitialAssignments);
+  const [splitPreset, setSplitPreset] = useState<'EQUAL' | 'LEAD_HEAVY' | 'CUSTOM'>('EQUAL');
   const [scheduledDate, setScheduledDate] = useState<string>(order.scheduledDate || todayStr);
   const [scheduledTimeSlot, setScheduledTimeSlot] = useState<string>(order.scheduledTimeSlot || '09:00 - 11:00');
   const [dispatcherNote, setDispatcherNote] = useState<string>('');
@@ -51,17 +87,118 @@ export const QuickDispatchModal: React.FC<QuickDispatchModalProps> = ({ order, o
     '15:30 - 17:30',
   ];
 
-  const selectedTech = technicians.find(t => t.id === selectedTechId);
+  // Auto calculate split percentages when preset changes or when tech count changes
+  const applySplitPreset = (techList: TechAssignmentItem[], preset: 'EQUAL' | 'LEAD_HEAVY' | 'CUSTOM') => {
+    if (techList.length === 0) return techList;
+    if (techList.length === 1) {
+      return [{ ...techList[0], roleInJob: 'LEAD' as const, commissionSharePercent: 100 }];
+    }
+
+    if (preset === 'EQUAL') {
+      const equalShare = Math.floor(100 / techList.length);
+      const remainder = 100 - (equalShare * techList.length);
+      return techList.map((t, idx) => ({
+        ...t,
+        commissionSharePercent: idx === 0 ? equalShare + remainder : equalShare,
+      }));
+    }
+
+    if (preset === 'LEAD_HEAVY') {
+      if (techList.length === 2) {
+        return [
+          { ...techList[0], roleInJob: 'LEAD' as const, commissionSharePercent: 60 },
+          { ...techList[1], roleInJob: 'ASSISTANT' as const, commissionSharePercent: 40 },
+        ];
+      }
+      if (techList.length === 3) {
+        return [
+          { ...techList[0], roleInJob: 'LEAD' as const, commissionSharePercent: 50 },
+          { ...techList[1], roleInJob: 'ASSISTANT' as const, commissionSharePercent: 25 },
+          { ...techList[2], roleInJob: 'ASSISTANT' as const, commissionSharePercent: 25 },
+        ];
+      }
+      const leadShare = 50;
+      const restShare = Math.floor((100 - leadShare) / (techList.length - 1));
+      return techList.map((t, idx) => ({
+        ...t,
+        commissionSharePercent: idx === 0 ? leadShare : restShare,
+      }));
+    }
+
+    return techList;
+  };
+
+  // Toggle technician selection in assignment
+  const handleToggleTech = (techId: string) => {
+    setAssignedTechs(prev => {
+      const exists = prev.some(t => t.technicianId === techId);
+      let updated: TechAssignmentItem[];
+
+      if (exists) {
+        // Remove technician
+        updated = prev.filter(t => t.technicianId !== techId);
+        // Ensure there is at least one LEAD if list not empty
+        if (updated.length > 0 && !updated.some(t => t.roleInJob === 'LEAD')) {
+          updated[0].roleInJob = 'LEAD';
+        }
+      } else {
+        // Add technician
+        const isFirst = prev.length === 0;
+        updated = [
+          ...prev,
+          {
+            technicianId: techId,
+            roleInJob: isFirst ? 'LEAD' : 'ASSISTANT',
+            commissionSharePercent: 0,
+          }
+        ];
+      }
+
+      return applySplitPreset(updated, splitPreset);
+    });
+  };
+
+  // Change a technician's role (Make LEAD)
+  const handleSetLead = (techId: string) => {
+    setAssignedTechs(prev => {
+      const updated = prev.map(t => {
+        if (t.technicianId === techId) {
+          return { ...t, roleInJob: 'LEAD' as const };
+        }
+        return { ...t, roleInJob: 'ASSISTANT' as const };
+      });
+      return applySplitPreset(updated, splitPreset);
+    });
+  };
+
+  // Change individual percentage
+  const handlePercentChange = (techId: string, value: number) => {
+    setSplitPreset('CUSTOM');
+    setAssignedTechs(prev => prev.map(t => {
+      if (t.technicianId === techId) {
+        return { ...t, commissionSharePercent: Math.max(0, Math.min(100, value)) };
+      }
+      return t;
+    }));
+  };
+
+  // Switch preset
+  const handlePresetChange = (preset: 'EQUAL' | 'LEAD_HEAVY' | 'CUSTOM') => {
+    setSplitPreset(preset);
+    if (preset !== 'CUSTOM') {
+      setAssignedTechs(prev => applySplitPreset(prev, preset));
+    }
+  };
 
   // Helper to check if technician is on duty today
   const isTechOnDuty = (techId: string) => {
-    return attendanceRecords.some(a => a.userId === techId && a.date === todayStr && !a.clockOutTime);
+    return attendanceRecords.some(a => a.technicianId === techId && a.date === todayStr && !a.clockOutTime);
   };
 
   // Helper to count active jobs assigned to tech on selected date
   const getTechWorkloadOnDate = (techId: string, date: string) => {
     return serviceOrders.filter(
-      o => o.technicianId === techId && 
+      o => (o.technicianId === techId || o.assignedTechnicians?.some(t => t.technicianId === techId)) && 
       o.scheduledDate === date && 
       o.status !== 'SELESAI' && 
       o.status !== 'DIBATALKAN' &&
@@ -69,11 +206,19 @@ export const QuickDispatchModal: React.FC<QuickDispatchModalProps> = ({ order, o
     ).length;
   };
 
+  // Base total commission estimation
+  const leadUser = users.find(u => u.id === (assignedTechs.find(t => t.roleInJob === 'LEAD')?.technicianId || assignedTechs[0]?.technicianId)) || users[0];
+  const baseOrderCommission = calculateCommissionForOrder(order, leadUser) || 0;
+
+  // Validation
+  const totalPercentSum = assignedTechs.reduce((sum, t) => sum + (t.commissionSharePercent || 0), 0);
+  const isPercentValid = assignedTechs.length === 0 || Math.abs(totalPercentSum - 100) <= 1;
+
   const handleDispatch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTechId) return;
+    if (assignedTechs.length === 0) return;
 
-    assignTechnician(order.id, selectedTechId, scheduledDate, scheduledTimeSlot);
+    assignTechnicians(order.id, assignedTechs, scheduledDate, scheduledTimeSlot);
 
     if (dispatcherNote.trim()) {
       const combinedNotes = order.customerNotes 
@@ -97,18 +242,18 @@ export const QuickDispatchModal: React.FC<QuickDispatchModalProps> = ({ order, o
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
-      <div className="relative w-full max-w-2xl bg-[#0F0F0F] rounded-3xl shadow-2xl overflow-hidden my-6 border border-white/15 text-white">
+      <div className="relative w-full max-w-3xl bg-[#0F0F0F] rounded-3xl shadow-2xl overflow-hidden my-6 border border-white/15 text-white">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 bg-white/5 border-b border-white/10">
           <div>
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs font-black text-blue-400">{order.orderNumber}</span>
               <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                DISPATCH ORDER
+                DISPATCH MULTI-TEKNISI
               </span>
             </div>
             <h3 className="font-black text-2xl tracking-tight text-white mt-0.5">
-              PILIH & TUGASKAN TEKNISI
+              PENUGASAN TIM TEKNISI LAPANGAN
             </h3>
           </div>
 
@@ -132,9 +277,12 @@ export const QuickDispatchModal: React.FC<QuickDispatchModalProps> = ({ order, o
               </div>
 
               <div className="sm:text-right">
-                <p className="text-[10px] font-black uppercase tracking-wider text-white/40">Nilai Servis</p>
+                <p className="text-[10px] font-black uppercase tracking-wider text-white/40">Nilai Servis & Estimasi Komisi</p>
                 <p className="font-black text-emerald-400 text-sm tabular-nums">
                   Rp {(order.grandTotal || 0).toLocaleString('id-ID')}
+                </p>
+                <p className="text-[11px] font-bold text-amber-400">
+                  Total Komisi Job: Rp {baseOrderCommission.toLocaleString('id-ID')}
                 </p>
               </div>
             </div>
@@ -153,103 +301,220 @@ export const QuickDispatchModal: React.FC<QuickDispatchModalProps> = ({ order, o
             </div>
           </div>
 
-          {/* Technician Selection List */}
+          {/* Multi-Technician Selection List */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="font-black uppercase tracking-wider text-white/70 block">
-                Pilih Teknisi yang Ditugaskan ({technicians.length} Teknisi Terdaftar)
-              </label>
-              <span className="text-[10px] text-white/40">Klik salah satu untuk memilih</span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <label className="font-black uppercase tracking-wider text-white/90 block text-xs">
+                  Pilih Teknisi Bertugas ({assignedTechs.length} Dipilih)
+                </label>
+                <p className="text-[10px] text-white/50">
+                  Centang lebih dari 1 teknisi untuk tugas tim gabungan (misal: Lead + Asisten).
+                </p>
+              </div>
+
+              {assignedTechs.length > 1 && (
+                <div className="flex items-center gap-1.5 bg-white/10 p-1 rounded-xl border border-white/10">
+                  <span className="text-[10px] font-bold text-white/60 px-2">Skema Bagi Komisi:</span>
+                  <button
+                    type="button"
+                    onClick={() => handlePresetChange('EQUAL')}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase transition cursor-pointer ${
+                      splitPreset === 'EQUAL' ? 'bg-blue-600 text-white' : 'text-white/60 hover:text-white'
+                    }`}
+                  >
+                    Bagi Rata ({Math.round(100 / assignedTechs.length)}%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePresetChange('LEAD_HEAVY')}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase transition cursor-pointer ${
+                      splitPreset === 'LEAD_HEAVY' ? 'bg-blue-600 text-white' : 'text-white/60 hover:text-white'
+                    }`}
+                  >
+                    Lead 60 : Asisten 40
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePresetChange('CUSTOM')}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[10px] uppercase transition cursor-pointer ${
+                      splitPreset === 'CUSTOM' ? 'bg-blue-600 text-white' : 'text-white/60 hover:text-white'
+                    }`}
+                  >
+                    Kustom %
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 gap-2.5">
               {technicians.map(tech => {
-                const isSelected = selectedTechId === tech.id;
+                const assignment = assignedTechs.find(t => t.technicianId === tech.id);
+                const isSelected = !!assignment;
+                const isLead = assignment?.roleInJob === 'LEAD';
                 const onDuty = isTechOnDuty(tech.id);
                 const workload = getTechWorkloadOnDate(tech.id, scheduledDate);
-                const estimatedComm = typeof calculateCommissionForOrder === 'function' 
-                  ? (calculateCommissionForOrder(order, tech) || 0)
-                  : 0;
+                
+                // Calculated share of commission
+                const techPercent = assignment ? assignment.commissionSharePercent : 0;
+                const estimatedComm = Math.round((baseOrderCommission * techPercent) / 100);
 
                 return (
                   <div
                     key={tech.id}
-                    onClick={() => setSelectedTechId(tech.id)}
-                    className={`p-4 rounded-2xl border-2 transition cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                    className={`p-4 rounded-2xl border-2 transition flex flex-col gap-3 ${
                       isSelected 
                         ? 'bg-blue-600/15 border-blue-500 shadow-lg shadow-blue-500/10' 
                         : 'bg-white/5 border-white/10 hover:border-white/25 hover:bg-white/10'
                     }`}
                   >
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <div className="relative">
-                        <img 
-                          src={tech.avatar} 
-                          alt={tech.name} 
-                          className="w-12 h-12 rounded-xl object-cover border border-white/20"
-                        />
-                        {onDuty && (
-                          <span 
-                            className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-black rounded-full"
-                            title="On-Duty (Presensi GPS Aktif)"
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      {/* Left: Avatar & Info */}
+                      <div 
+                        onClick={() => handleToggleTech(tech.id)} 
+                        className="flex items-center gap-3.5 min-w-0 cursor-pointer flex-1"
+                      >
+                        <div className="relative shrink-0">
+                          <img 
+                            src={tech.avatar} 
+                            alt={tech.name} 
+                            className="w-12 h-12 rounded-xl object-cover border border-white/20"
                           />
-                        )}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-black text-white text-sm">{tech.name}</h4>
-                          <span className="text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded">
-                            ★ {tech.rating || '5.0'}
-                          </span>
-                          {onDuty ? (
-                            <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded border border-emerald-500/30">
-                              🟢 On-Duty GPS
-                            </span>
-                          ) : (
-                            <span className="text-[9px] font-bold text-white/40">
-                              ⚪ Belum Presensi
-                            </span>
+                          {onDuty && (
+                            <span 
+                              className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-black rounded-full"
+                              title="On-Duty (Presensi GPS Aktif)"
+                            />
                           )}
                         </div>
 
-                        <p className="text-white/50 text-[11px] mt-0.5">
-                          {tech.phone} • {tech.totalJobsCompleted || 0} Servis Tuntas
-                        </p>
-
-                        {tech.specialization && tech.specialization.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {tech.specialization.map((spec, i) => (
-                              <span key={i} className="text-[9px] bg-white/10 text-white/70 px-1.5 py-0.5 rounded font-medium">
-                                {spec}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="font-black text-white text-sm">{tech.name}</h4>
+                            <span className="text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.2 rounded">
+                              ★ {tech.rating || '5.0'}
+                            </span>
+                            {onDuty ? (
+                              <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded border border-emerald-500/30">
+                                🟢 On-Duty GPS
                               </span>
-                            ))}
+                            ) : (
+                              <span className="text-[9px] font-bold text-white/40">
+                                ⚪ Belum Presensi
+                              </span>
+                            )}
                           </div>
-                        )}
+
+                          <p className="text-white/50 text-[11px] mt-0.5">
+                            {tech.phone} • {tech.totalJobsCompleted || 0} Servis Tuntas
+                          </p>
+
+                          {tech.specialization && tech.specialization.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {tech.specialization.map((spec, i) => (
+                                <span key={i} className="text-[9px] bg-white/10 text-white/70 px-1.5 py-0.5 rounded font-medium">
+                                  {spec}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right: Select Checkbox & Status */}
+                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                        <div className="text-left sm:text-right">
+                          <span className="text-[10px] font-bold text-white/40 block">Beban Tanggal Ini:</span>
+                          <span className={`font-black text-xs ${workload > 2 ? 'text-amber-400' : 'text-white'}`}>
+                            {workload === 0 ? 'Tersedia (0 Job)' : `${workload} Job Terjadwal`}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleToggleTech(tech.id)}
+                          className={`w-7 h-7 rounded-xl flex items-center justify-center border-2 transition cursor-pointer ${
+                            isSelected 
+                              ? 'bg-blue-600 border-blue-400 text-white shadow-md' 
+                              : 'border-white/30 text-transparent hover:border-white/60'
+                          }`}
+                        >
+                          <CheckCircle2 className="w-4 h-4 fill-white text-blue-600" />
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
-                      <div className="text-left sm:text-right">
-                        <span className="text-[10px] font-bold text-white/40 block">Beban Tanggal Ini:</span>
-                        <span className={`font-black text-xs ${workload > 2 ? 'text-amber-400' : 'text-white'}`}>
-                          {workload === 0 ? 'Tersedia (0 Job)' : `${workload} Job Terjadwal`}
-                        </span>
-                        <span className="text-[10px] font-bold text-emerald-400 block mt-0.5 tabular-nums">
-                          Komisi: Rp {(estimatedComm || 0).toLocaleString('id-ID')}
-                        </span>
-                      </div>
+                    {/* Role & Commission Sharing Options when Selected */}
+                    {isSelected && (
+                      <div className="pt-3 mt-1 border-t border-blue-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-black/30 p-3 rounded-xl">
+                        {/* Role selection */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-white/60">Peran Tim:</span>
+                          <button
+                            type="button"
+                            onClick={() => handleSetLead(tech.id)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase flex items-center gap-1.5 transition cursor-pointer ${
+                              isLead 
+                                ? 'bg-amber-500 text-black shadow-md' 
+                                : 'bg-white/10 text-white/60 hover:text-white'
+                            }`}
+                          >
+                            <Crown className="w-3 h-3" />
+                            Teknisi Utama (Lead)
+                          </button>
 
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 transition ${
-                        isSelected ? 'bg-blue-600 border-blue-400 text-white' : 'border-white/30 text-transparent'
-                      }`}>
-                        <CheckCircle2 className="w-4 h-4 fill-white text-blue-600" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAssignedTechs(prev => prev.map(t => t.technicianId === tech.id ? { ...t, roleInJob: 'ASSISTANT' as const } : t));
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition cursor-pointer ${
+                              !isLead 
+                                ? 'bg-blue-600 text-white shadow-md' 
+                                : 'bg-white/10 text-white/60 hover:text-white'
+                            }`}
+                          >
+                            Asisten / Pendamping
+                          </button>
+                        </div>
+
+                        {/* Commission Percentage & Rp Value */}
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-white/60">Porsi Komisi:</span>
+                            <div className="flex items-center bg-black border border-white/20 rounded-lg px-2 py-0.5">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={techPercent}
+                                onChange={e => handlePercentChange(tech.id, parseInt(e.target.value) || 0)}
+                                className="w-10 bg-transparent text-right font-black text-white text-xs outline-none"
+                              />
+                              <span className="text-white/60 font-bold ml-0.5">%</span>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <span className="text-[11px] font-black text-emerald-400 tabular-nums">
+                              Rp {estimatedComm.toLocaleString('id-ID')}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               })}
             </div>
+
+            {/* Validation warning if percentage != 100 */}
+            {assignedTechs.length > 1 && !isPercentValid && (
+              <div className="p-3 bg-amber-500/20 border border-amber-500/40 rounded-xl flex items-center gap-2 text-amber-300">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>Total pembagian komisi saat ini <strong>{totalPercentSum}%</strong> (Harus berjumlah 100%). Klik "Bagi Rata" untuk penyesuaian otomatis.</span>
+              </div>
+            )}
           </div>
 
           {/* Schedule Adjustment */}
@@ -269,7 +534,7 @@ export const QuickDispatchModal: React.FC<QuickDispatchModalProps> = ({ order, o
               <select
                 value={scheduledTimeSlot}
                 onChange={e => setScheduledTimeSlot(e.target.value)}
-                className="w-full p-2.5 bg-black border border-white/15 rounded-xl text-white font-bold text-xs focus:ring-2 focus:ring-blue-500"
+                className="w-full p-2.5 bg-black border border-white/15 rounded-xl text-white font-bold text-xs focus:ring-2 focus:ring-blue-500 cursor-pointer"
               >
                 {timeSlots.map(slot => (
                   <option key={slot} value={slot}>{slot} WIB</option>
@@ -287,7 +552,7 @@ export const QuickDispatchModal: React.FC<QuickDispatchModalProps> = ({ order, o
               type="text"
               value={dispatcherNote}
               onChange={e => setDispatcherNote(e.target.value)}
-              placeholder="Contoh: Bawa tangga lipat 3m dan cek outdoor di lantai 2"
+              placeholder="Contoh: Bawa tangga lipat 3m, split tugas 1 teknisi cuci indoor, 1 teknisi cek outdoor & freon"
               className="w-full p-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-xs placeholder-white/40 focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -297,18 +562,18 @@ export const QuickDispatchModal: React.FC<QuickDispatchModalProps> = ({ order, o
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold uppercase"
+              className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold uppercase cursor-pointer"
             >
               Batal
             </button>
 
             <button
               type="submit"
-              disabled={!selectedTechId}
+              disabled={assignedTechs.length === 0}
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-blue-600/30 transition cursor-pointer"
             >
-              <UserCheck className="w-4 h-4" />
-              Tugaskan ke {selectedTech?.name || 'Teknisi'}
+              <Users className="w-4 h-4" />
+              Tugaskan {assignedTechs.length} Teknisi Bertugas
             </button>
           </div>
         </form>

@@ -58,7 +58,10 @@ export const ServiceOrdersList: React.FC<ServiceOrdersListProps> = ({ onOpenBook
   let filteredOrders = [...serviceOrders];
 
   if (currentUser.role === 'TEKNISI') {
-    filteredOrders = filteredOrders.filter(o => o.technicianId === currentUser.id);
+    filteredOrders = filteredOrders.filter(o => 
+      o.technicianId === currentUser.id || 
+      o.assignedTechnicians?.some(t => t.technicianId === currentUser.id)
+    );
   } else if (currentUser.role.startsWith('PELANGGAN')) {
     filteredOrders = filteredOrders.filter(o => o.customerId === currentUser.id || (currentUser.companyName && o.companyName === currentUser.companyName));
   }
@@ -77,7 +80,8 @@ export const ServiceOrdersList: React.FC<ServiceOrdersListProps> = ({ onOpenBook
       o.orderNumber.toLowerCase().includes(q) ||
       o.customerName.toLowerCase().includes(q) ||
       o.customerAddress.toLowerCase().includes(q) ||
-      (o.technicianName && o.technicianName.toLowerCase().includes(q))
+      (o.technicianName && o.technicianName.toLowerCase().includes(q)) ||
+      (o.assignedTechnicians && o.assignedTechnicians.some(t => t.technicianName.toLowerCase().includes(q)))
     );
   }
 
@@ -257,8 +261,13 @@ export const ServiceOrdersList: React.FC<ServiceOrdersListProps> = ({ onOpenBook
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {filteredOrders.map(order => {
-            const isAssignedToCurrentTech = currentUser.id === order.technicianId;
+            const isAssignedToCurrentTech = currentUser.id === order.technicianId || 
+              order.assignedTechnicians?.some(t => t.technicianId === currentUser.id);
             const canReview = currentUser.role.startsWith('PELANGGAN') && order.status === 'SELESAI' && !order.review;
+
+            const myCommission = currentUser.role === 'TEKNISI' 
+              ? (order.assignedTechnicians?.find(t => t.technicianId === currentUser.id)?.commissionEarned ?? order.technicianCommissionEarned)
+              : undefined;
 
             return (
               <div
@@ -325,8 +334,32 @@ export const ServiceOrdersList: React.FC<ServiceOrdersListProps> = ({ onOpenBook
                   </div>
 
                   <div className="space-y-1">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-white/40">Teknisi Bertugas</p>
-                    {order.technicianName ? (
+                    <p className="text-[10px] font-black uppercase tracking-widest text-white/40">
+                      Teknisi Bertugas {order.assignedTechnicians && order.assignedTechnicians.length > 1 ? `(${order.assignedTechnicians.length} Orang)` : ''}
+                    </p>
+                    {order.assignedTechnicians && order.assignedTechnicians.length > 0 ? (
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          {order.assignedTechnicians.map((at, idx) => (
+                            <span
+                              key={idx}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                at.roleInJob === 'LEAD'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                  : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                              }`}
+                            >
+                              {at.technicianName} ({at.roleInJob === 'LEAD' ? 'Lead' : 'Asisten'})
+                            </span>
+                          ))}
+                        </div>
+                        {currentUser.role === 'TEKNISI' && myCommission !== undefined && (
+                          <p className="text-emerald-400 font-black text-[11px] mt-1">
+                            Porsi Komisi Anda: Rp {myCommission.toLocaleString('id-ID')}
+                          </p>
+                        )}
+                      </div>
+                    ) : order.technicianName ? (
                       <div>
                         <p className="font-bold text-white">{order.technicianName}</p>
                         <p className="text-white/50">{order.technicianPhone}</p>
@@ -377,7 +410,7 @@ export const ServiceOrdersList: React.FC<ServiceOrdersListProps> = ({ onOpenBook
                         <UserCheck className="w-3.5 h-3.5 text-blue-300" />
                         {!order.technicianId || order.status === 'MENUNGGU_KONFIRMASI'
                           ? 'Pilih & Tugaskan Teknisi'
-                          : 'Ganti Teknisi'}
+                          : 'Kelola Tim Teknisi'}
                       </button>
                     )}
 

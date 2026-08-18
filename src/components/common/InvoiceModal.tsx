@@ -87,7 +87,20 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
             </div>
             <div>
               <p className="text-xs font-bold uppercase text-slate-400 tracking-wider">TEKNISI BERTUGAS</p>
-              <h4 className="font-bold text-slate-900 text-base mt-1">{order.technicianName || 'Tim KoolFix'}</h4>
+              {order.assignedTechnicians && order.assignedTechnicians.length > 0 ? (
+                <div className="mt-1 space-y-1">
+                  {order.assignedTechnicians.map((t, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 text-xs text-slate-900 font-bold">
+                      <span>• {t.technicianName}</span>
+                      <span className="text-[10px] font-semibold text-slate-500">
+                        ({t.roleInJob === 'LEAD' ? 'Lead' : 'Asisten'})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <h4 className="font-bold text-slate-900 text-base mt-1">{order.technicianName || 'Tim KoolFix'}</h4>
+              )}
               <p className="text-xs text-slate-600 mt-1">Kontak Teknisi: {order.technicianPhone || '-'}</p>
               <p className="text-xs text-slate-600 mt-0.5">Waktu Servis: {order.scheduledTimeSlot}</p>
               {order.paymentMethod && (

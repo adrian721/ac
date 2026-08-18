@@ -754,6 +754,17 @@ export const mockServiceOrders: ServiceOrder[] = [
     technicianId: 'usr-tek-1',
     technicianName: 'Agus Pratama',
     technicianPhone: '085211223344',
+    assignedTechnicians: [
+      {
+        technicianId: 'usr-tek-1',
+        technicianName: 'Agus Pratama',
+        technicianPhone: '085211223344',
+        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+        roleInJob: 'LEAD',
+        commissionSharePercent: 100,
+        commissionEarned: 90000,
+      }
+    ],
     scheduledDate: '2026-08-16',
     scheduledTimeSlot: '09:00 - 11:00',
     serviceItems: [
@@ -846,6 +857,26 @@ export const mockServiceOrders: ServiceOrder[] = [
     technicianId: 'usr-tek-1',
     technicianName: 'Agus Pratama',
     technicianPhone: '085211223344',
+    assignedTechnicians: [
+      {
+        technicianId: 'usr-tek-1',
+        technicianName: 'Agus Pratama',
+        technicianPhone: '085211223344',
+        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+        roleInJob: 'LEAD',
+        commissionSharePercent: 60,
+        commissionEarned: 168000,
+      },
+      {
+        technicianId: 'usr-tek-2',
+        technicianName: 'Rian Setiawan',
+        technicianPhone: '085699887766',
+        avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+        roleInJob: 'ASSISTANT',
+        commissionSharePercent: 40,
+        commissionEarned: 112000,
+      }
+    ],
     scheduledDate: '2026-08-16',
     scheduledTimeSlot: '13:30 - 16:30',
     serviceItems: [
@@ -876,7 +907,7 @@ export const mockServiceOrders: ServiceOrder[] = [
     grandTotal: 860000,
     status: 'SEDANG_DIKERJAKAN',
     paymentStatus: 'BELUM_BAYAR',
-    customerNotes: 'Kunjungan rutin bulan Agustus sesuai SPK Kontrak Maintenance No. SPK-SDN-2026/08.',
+    customerNotes: 'Kunjungan rutin bulan Agustus sesuai SPK Kontrak Maintenance No. SPK-SDN-2026/08. Ditugaskan tim gabungan 2 teknisi karena mencakup AC Cassette & Ruang Server.',
     technicianCommissionEarned: 280000,
     createdAt: '2026-08-14 09:00',
     updatedAt: '2026-08-16 13:40',
@@ -892,6 +923,17 @@ export const mockServiceOrders: ServiceOrder[] = [
     technicianId: 'usr-tek-2',
     technicianName: 'Rian Setiawan',
     technicianPhone: '085699887766',
+    assignedTechnicians: [
+      {
+        technicianId: 'usr-tek-2',
+        technicianName: 'Rian Setiawan',
+        technicianPhone: '085699887766',
+        avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+        roleInJob: 'LEAD',
+        commissionSharePercent: 100,
+        commissionEarned: 30000,
+      }
+    ],
     scheduledDate: '2026-08-17',
     scheduledTimeSlot: '10:00 - 12:00',
     serviceItems: [
@@ -930,6 +972,17 @@ export const mockServiceOrders: ServiceOrder[] = [
     technicianId: 'usr-tek-3',
     technicianName: 'Dimas Saputra',
     technicianPhone: '087811445566',
+    assignedTechnicians: [
+      {
+        technicianId: 'usr-tek-3',
+        technicianName: 'Dimas Saputra',
+        technicianPhone: '087811445566',
+        avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80',
+        roleInJob: 'LEAD',
+        commissionSharePercent: 100,
+        commissionEarned: 320000,
+      }
+    ],
     scheduledDate: '2026-08-17',
     scheduledTimeSlot: '14:00 - 17:00',
     serviceItems: [

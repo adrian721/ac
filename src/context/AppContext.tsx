@@ -18,7 +18,8 @@ import {
   CustomerReview, 
   TechnicalReport, 
   TechnicianDailyEarnings,
-  SparePartUsed
+  SparePartUsed,
+  AssignedTechnician
 } from '../types';
 import { 
   mockUsers, 
@@ -87,6 +88,12 @@ interface AppContextType {
   createServiceOrder: (orderData: Partial<ServiceOrder>) => ServiceOrder;
   updateServiceOrder: (id: string, updates: Partial<ServiceOrder>) => void;
   assignTechnician: (orderId: string, technicianId: string, scheduledDate: string, timeSlot: string) => void;
+  assignTechnicians: (
+    orderId: string, 
+    assignments: { technicianId: string; roleInJob?: 'LEAD' | 'ASSISTANT' | 'MEMBER'; commissionSharePercent?: number }[], 
+    scheduledDate: string, 
+    timeSlot: string
+  ) => void;
   updateOrderStatus: (orderId: string, status: ServiceStatus) => void;
   completeTechnicianJob: (orderId: string, report: TechnicalReport, partsUsed: SparePartUsed[], paymentMethod: 'TUNAI' | 'TRANSFER_BANK' | 'QRIS' | 'TEMPO_KANTOR') => void;
   submitCustomerReview: (orderId: string, review: Omit<CustomerReview, 'id' | 'orderId' | 'createdAt'>) => void;
@@ -585,12 +592,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const grandTotal = Math.max(0, totalServicePrice + totalSparePartsPrice - discount);
 
     let commission = 0;
-    if (orderData.technicianId) {
+    let assignedTechs: AssignedTechnician[] | undefined = orderData.assignedTechnicians;
+
+    if (!assignedTechs && orderData.technicianId) {
       const tech = users.find(u => u.id === orderData.technicianId);
       if (tech) {
         commission = calculateCommissionForOrder({ ...orderData, totalServicePrice } as ServiceOrder, tech);
+        assignedTechs = [
+          {
+            technicianId: tech.id,
+            technicianName: tech.name,
+            technicianPhone: tech.phone,
+            avatar: tech.avatar,
+            roleInJob: 'LEAD',
+            commissionSharePercent: 100,
+            commissionEarned: commission,
+          }
+        ];
       }
+    } else if (assignedTechs && assignedTechs.length > 0) {
+      commission = assignedTechs.reduce((sum, t) => sum + (t.commissionEarned || 0), 0);
     }
+
+    const leadTech = assignedTechs?.find(t => t.roleInJob === 'LEAD') || assignedTechs?.[0];
 
     const newOrder: ServiceOrder = {
       id: `ord-${Date.now()}`,
@@ -601,9 +625,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       customerAddress: orderData.customerAddress || currentUser.address || '',
       customerType: orderData.customerType || (currentUser.role === 'PELANGGAN_KANTOR' ? 'KANTOR' : 'UMUM'),
       companyName: orderData.companyName || currentUser.companyName,
-      technicianId: orderData.technicianId,
-      technicianName: orderData.technicianName,
-      technicianPhone: orderData.technicianPhone,
+      technicianId: leadTech?.technicianId || orderData.technicianId,
+      technicianName: leadTech?.technicianName || orderData.technicianName,
+      technicianPhone: leadTech?.technicianPhone || orderData.technicianPhone,
+      assignedTechnicians: assignedTechs,
       scheduledDate: orderData.scheduledDate || today.toISOString().split('T')[0],
       scheduledTimeSlot: orderData.scheduledTimeSlot || '09:00 - 11:00',
       serviceItems: orderData.serviceItems || [],
@@ -640,28 +665,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
   };
 
-  const assignTechnician = (orderId: string, technicianId: string, scheduledDate: string, timeSlot: string) => {
-    const tech = users.find(u => u.id === technicianId);
-    if (!tech) return;
+  // Assign multiple technicians to a single service order
+  const assignTechnicians = (
+    orderId: string, 
+    assignments: { technicianId: string; roleInJob?: 'LEAD' | 'ASSISTANT' | 'MEMBER'; commissionSharePercent?: number }[], 
+    scheduledDate: string, 
+    timeSlot: string
+  ) => {
+    if (!assignments || assignments.length === 0) return;
 
     setServiceOrders(prev => prev.map(o => {
       if (o.id === orderId) {
-        const comm = calculateCommissionForOrder(o, tech);
+        // Calculate default split if not explicitly specified
+        const totalPctProvided = assignments.reduce((sum, a) => sum + (a.commissionSharePercent || 0), 0);
+        
+        const mappedTechs: AssignedTechnician[] = assignments.map((a, idx) => {
+          const userTech = users.find(u => u.id === a.technicianId);
+          let share = a.commissionSharePercent;
+          if (share === undefined || totalPctProvided === 0) {
+            if (assignments.length === 1) {
+              share = 100;
+            } else if (assignments.length === 2) {
+              share = idx === 0 ? 60 : 40; // Default Lead 60%, Asisten 40%
+            } else {
+              share = Math.round(100 / assignments.length);
+            }
+          }
+
+          // Calculate technician's individual commission
+          const baseComm = calculateCommissionForOrder(o, userTech || users[0]);
+          const techCommission = Math.round((baseComm * share) / 100);
+
+          return {
+            technicianId: a.technicianId,
+            technicianName: userTech?.name || 'Teknisi KoolFix',
+            technicianPhone: userTech?.phone || '',
+            avatar: userTech?.avatar,
+            roleInJob: a.roleInJob || (idx === 0 ? 'LEAD' : 'ASSISTANT'),
+            commissionSharePercent: share,
+            commissionEarned: techCommission,
+          };
+        });
+
+        const leadTech = mappedTechs.find(t => t.roleInJob === 'LEAD') || mappedTechs[0];
+        const totalCommission = mappedTechs.reduce((sum, t) => sum + (t.commissionEarned || 0), 0);
+
         return {
           ...o,
-          technicianId: tech.id,
-          technicianName: tech.name,
-          technicianPhone: tech.phone,
+          technicianId: leadTech.technicianId,
+          technicianName: leadTech.technicianName,
+          technicianPhone: leadTech.technicianPhone,
+          assignedTechnicians: mappedTechs,
           scheduledDate,
           scheduledTimeSlot: timeSlot,
           status: 'DITUGASKAN',
-          technicianCommissionEarned: comm,
+          technicianCommissionEarned: totalCommission,
           updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
         };
       }
       return o;
     }));
-    showNotification(`Teknisi ${tech.name} berhasil ditugaskan ke pesanan!`, 'success');
+
+    const techNames = assignments.map(a => users.find(u => u.id === a.technicianId)?.name).filter(Boolean).join(', ');
+    showNotification(`Penugasan ${assignments.length} teknisi (${techNames}) berhasil disimpan!`, 'success');
+  };
+
+  // Backward compatible single technician assign
+  const assignTechnician = (orderId: string, technicianId: string, scheduledDate: string, timeSlot: string) => {
+    assignTechnicians(
+      orderId,
+      [{ technicianId, roleInJob: 'LEAD', commissionSharePercent: 100 }],
+      scheduledDate,
+      timeSlot
+    );
   };
 
   const updateOrderStatus = (orderId: string, status: ServiceStatus) => {
@@ -678,7 +754,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showNotification(`Status pengerjaan diperbarui menjadi: ${status.replace(/_/g, ' ')}`, 'info');
   };
 
-  // Complete job with full technical inspection report, spare parts deduction & commission payout recording
+  // Complete job with full technical inspection report, spare parts deduction & multi-technician commission calculation
   const completeTechnicianJob = (
     orderId: string, 
     report: TechnicalReport, 
@@ -688,7 +764,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetOrder = serviceOrders.find(o => o.id === orderId);
     if (!targetOrder) return;
 
-    const tech = users.find(u => u.id === targetOrder.technicianId) || currentUser;
+    const leadTech = users.find(u => u.id === targetOrder.technicianId) || currentUser;
     const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
 
     // 1. Calculate spare parts total
@@ -722,14 +798,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         referenceOrderId: targetOrder.id,
         referenceOrderNumber: targetOrder.orderNumber,
         notes: `Digunakan pada pekerjaan servis ${targetOrder.customerName}`,
-        performedBy: tech.name,
+        performedBy: leadTech.name,
         createdAt: nowStr,
       }));
       setInventoryTransactions(prev => [...newInvTrx, ...prev]);
     }
 
-    // 3. Calculate technician commission
-    const commission = calculateCommissionForOrder({ ...targetOrder, totalServicePrice: targetOrder.totalServicePrice }, tech);
+    // 3. Calculate technician commission(s) for all assigned technicians
+    let updatedAssignedTechs: AssignedTechnician[] | undefined = undefined;
+    let totalCalculatedCommission = 0;
+
+    if (targetOrder.assignedTechnicians && targetOrder.assignedTechnicians.length > 0) {
+      updatedAssignedTechs = targetOrder.assignedTechnicians.map(at => {
+        const share = at.commissionSharePercent || (100 / targetOrder.assignedTechnicians!.length);
+        const techUser = users.find(u => u.id === at.technicianId) || leadTech;
+        const individualBase = calculateCommissionForOrder({ ...targetOrder, totalServicePrice: targetOrder.totalServicePrice }, techUser);
+        const commEarned = Math.round((individualBase * share) / 100);
+        return {
+          ...at,
+          commissionEarned: commEarned,
+        };
+      });
+      totalCalculatedCommission = updatedAssignedTechs.reduce((sum, t) => sum + (t.commissionEarned || 0), 0);
+    } else {
+      totalCalculatedCommission = calculateCommissionForOrder({ ...targetOrder, totalServicePrice: targetOrder.totalServicePrice }, leadTech);
+      updatedAssignedTechs = [
+        {
+          technicianId: leadTech.id,
+          technicianName: leadTech.name,
+          technicianPhone: leadTech.phone,
+          avatar: leadTech.avatar,
+          roleInJob: 'LEAD',
+          commissionSharePercent: 100,
+          commissionEarned: totalCalculatedCommission,
+        }
+      ];
+    }
 
     // 4. Update service order
     const updatedOrder: ServiceOrder = {
@@ -744,7 +848,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...report,
         completedAt: nowStr,
       },
-      technicianCommissionEarned: commission,
+      assignedTechnicians: updatedAssignedTechs,
+      technicianCommissionEarned: totalCalculatedCommission,
       updatedAt: nowStr,
     };
 
@@ -763,20 +868,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         referenceOrderId: targetOrder.id,
         referenceOrderNumber: targetOrder.orderNumber,
         description: `Pembayaran Selesai Servis AC #${targetOrder.orderNumber} - ${targetOrder.customerName}`,
-        recordedBy: tech.name,
+        recordedBy: leadTech.name,
       };
       setFinancialTransactions(prev => [newFinTrx, ...prev]);
     }
 
-    // 6. Update technician total completed jobs count
+    // 6. Update all assigned technicians total completed jobs count
+    const assignedIds = updatedAssignedTechs.map(t => t.technicianId);
     setUsers(prev => prev.map(u => {
-      if (u.id === tech.id) {
+      if (assignedIds.includes(u.id)) {
         return { ...u, totalJobsCompleted: (u.totalJobsCompleted || 0) + 1 };
       }
       return u;
     }));
 
-    showNotification(`Pengerjaan #${targetOrder.orderNumber} selesai! Komisi Rp ${commission.toLocaleString('id-ID')} masuk ke rincian penghasilan.`, 'success');
+    showNotification(`Pengerjaan #${targetOrder.orderNumber} selesai! Laporan teknis & komisi tim berhasil diproses.`, 'success');
   };
 
   // Submit Review
@@ -798,21 +904,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return o;
     }));
 
-    // Update technician rating average
-    if (order.technicianId) {
-      const techOrders = serviceOrders.filter(o => o.technicianId === order.technicianId && o.review);
-      const allRatings = [...techOrders.map(o => o.review!.rating), newReview.rating];
-      const avg = (allRatings.reduce((sum, r) => sum + r, 0) / allRatings.length).toFixed(1);
+    // Update technician rating average for all assigned technicians
+    const targetTechIds = order.assignedTechnicians && order.assignedTechnicians.length > 0
+      ? order.assignedTechnicians.map(t => t.technicianId)
+      : (order.technicianId ? [order.technicianId] : []);
 
-      setUsers(prev => prev.map(u => {
-        if (u.id === order.technicianId) {
-          return { ...u, rating: parseFloat(avg) };
-        }
-        return u;
-      }));
+    if (targetTechIds.length > 0) {
+      targetTechIds.forEach(tId => {
+        const techOrders = serviceOrders.filter(o => 
+          (o.technicianId === tId || o.assignedTechnicians?.some(at => at.technicianId === tId)) && 
+          o.review
+        );
+        const allRatings = [...techOrders.map(o => o.review!.rating), newReview.rating];
+        const avg = (allRatings.reduce((sum, r) => sum + r, 0) / allRatings.length).toFixed(1);
+
+        setUsers(prev => prev.map(u => {
+          if (u.id === tId) {
+            return { ...u, rating: parseFloat(avg) };
+          }
+          return u;
+        }));
+      });
     }
 
-    showNotification('Terima kasih atas ulasan & penilaian Anda untuk teknisi KoolFix!', 'success');
+    showNotification('Terima kasih atas ulasan & penilaian Anda untuk tim teknisi KoolFix!', 'success');
   };
 
   // Inventory Methods
@@ -980,6 +1095,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showNotification(`Pengeluaran Rp ${expense.amount.toLocaleString('id-ID')} dicatat ke kas`, 'success');
   };
 
+  // Helper to extract a technician's specific commission on an order
+  const getTechCommissionForOrder = (order: ServiceOrder, techId: string): number => {
+    if (order.assignedTechnicians && order.assignedTechnicians.length > 0) {
+      const match = order.assignedTechnicians.find(t => t.technicianId === techId);
+      if (match && typeof match.commissionEarned === 'number') {
+        return match.commissionEarned;
+      }
+      if (match && typeof match.commissionSharePercent === 'number') {
+        return Math.round(((order.technicianCommissionEarned || 0) * match.commissionSharePercent) / 100);
+      }
+    }
+    if (order.technicianId === techId) {
+      return order.technicianCommissionEarned || 0;
+    }
+    return 0;
+  };
+
   // Technician Daily Earnings Calculation (Transparent & Real-time)
   const getTechnicianDailyEarnings = (technicianId: string, dateStr: string): TechnicianDailyEarnings => {
     const tech = users.find(u => u.id === technicianId);
@@ -1000,22 +1132,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // 3. Completed jobs on that date
+    // 3. Completed jobs on that date (supports multi-technician assigned jobs)
     const completedJobsToday = serviceOrders.filter(o => 
-      o.technicianId === technicianId && 
+      (o.technicianId === technicianId || o.assignedTechnicians?.some(t => t.technicianId === technicianId)) && 
       o.status === 'SELESAI' && 
       (o.scheduledDate === dateStr || o.technicalReport?.completedAt?.startsWith(dateStr))
     );
 
     const jobBreakdown = completedJobsToday.map(job => {
       const serviceNames = job.serviceItems.map(s => `${s.categoryName} (${s.unitCount}x)`).join(', ');
+      const myCommission = getTechCommissionForOrder(job, technicianId);
+      const teamSuffix = job.assignedTechnicians && job.assignedTechnicians.length > 1
+        ? ` (Tim: ${job.assignedTechnicians.length} Teknisi)`
+        : '';
       return {
         orderId: job.id,
         orderNumber: job.orderNumber,
-        customerName: job.customerName,
+        customerName: `${job.customerName}${teamSuffix}`,
         serviceNames,
         orderAmount: job.grandTotal,
-        commissionEarned: job.technicianCommissionEarned || 0,
+        commissionEarned: myCommission,
       };
     });
 
@@ -1046,14 +1182,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const attendanceDays = monthlyAttendance.length;
     const totalAttendanceAllowance = monthlyAttendance.reduce((sum, a) => sum + a.allowanceEarned, 0);
 
-    // Filter completed jobs in that month
+    // Filter completed jobs in that month (supports multi-technician assigned jobs)
     const monthlyJobs = serviceOrders.filter(o => 
-      o.technicianId === technicianId && 
+      (o.technicianId === technicianId || o.assignedTechnicians?.some(t => t.technicianId === technicianId)) && 
       o.status === 'SELESAI' && 
       o.scheduledDate.startsWith(yearMonth)
     );
     const completedJobsCount = monthlyJobs.length;
-    const totalCommissions = monthlyJobs.reduce((sum, o) => sum + (o.technicianCommissionEarned || 0), 0);
+    const totalCommissions = monthlyJobs.reduce((sum, o) => sum + getTechCommissionForOrder(o, technicianId), 0);
 
     const baseSalary = config.enableBaseSalary ? config.baseSalaryAmount : 0;
     const totalMonthlyEarnings = baseSalary + totalAttendanceAllowance + totalCommissions;
@@ -1113,6 +1249,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createServiceOrder,
       updateServiceOrder,
       assignTechnician,
+      assignTechnicians,
       updateOrderStatus,
       completeTechnicianJob,
       submitCustomerReview,

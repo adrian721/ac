@@ -148,6 +148,16 @@ export interface TechnicalReport {
   completedAt?: string;
 }
 
+export interface AssignedTechnician {
+  technicianId: string;
+  technicianName: string;
+  technicianPhone?: string;
+  avatar?: string;
+  roleInJob: 'LEAD' | 'ASSISTANT' | 'MEMBER'; // 'Teknisi Utama (Lead)' | 'Asisten / Pendamping'
+  commissionSharePercent?: number; // e.g. 50 (50%), 60 (60%), 100 (100%)
+  commissionEarned?: number; // Calculated commission amount for this technician
+}
+
 export interface ServiceOrder {
   id: string;
   orderNumber: string; // e.g. ORD-2026-001
@@ -158,9 +168,13 @@ export interface ServiceOrder {
   customerType: 'UMUM' | 'KANTOR';
   companyName?: string;
   
+  // Primary / Lead Technician (Maintained for seamless compatibility)
   technicianId?: string;
   technicianName?: string;
   technicianPhone?: string;
+
+  // Multi-technician assignment support
+  assignedTechnicians?: AssignedTechnician[];
   
   scheduledDate: string; // YYYY-MM-DD
   scheduledTimeSlot: string; // e.g. "09:00 - 11:00", "13:00 - 15:00"
@@ -189,7 +203,7 @@ export interface ServiceOrder {
   createdAt: string;
   updatedAt: string;
   
-  // Commission for this job calculated for the technician
+  // Total Commission for this job calculated across all technicians
   technicianCommissionEarned?: number;
   
   // Customer Review

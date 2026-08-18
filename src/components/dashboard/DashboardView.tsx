@@ -71,7 +71,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Technician Specific data
   const techTodayEarnings = getTechnicianDailyEarnings(currentUser.id, todayStr);
   const techAssignedOrders = serviceOrders.filter(
-    o => o.technicianId === currentUser.id && o.status !== 'SELESAI' && o.status !== 'DIBATALKAN'
+    o => (o.technicianId === currentUser.id || o.assignedTechnicians?.some(t => t.technicianId === currentUser.id)) && 
+    o.status !== 'SELESAI' && 
+    o.status !== 'DIBATALKAN'
   );
 
   // Customer Specific data
